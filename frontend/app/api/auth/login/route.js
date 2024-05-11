@@ -56,6 +56,7 @@ export async function POST(request) {
     return NextResponse.json(
       {
         message: error.response.data.message,
+        error: error.response.data.error,
       },
       {
         status: error.response.status,
