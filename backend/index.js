@@ -2,8 +2,11 @@ const express = require("express");
 const { createClient } = require("@supabase/supabase-js");
 const { faker } = require("@faker-js/faker");
 const randomstring = require("randomstring");
+var cors = require("cors");
 
 const app = express();
+
+app.use(cors());
 
 //Server port
 const PORT = 3001;
@@ -62,12 +65,14 @@ app.post("/api/auth/signin", async (req, res) => {
   });
 
   if (error) {
-    return res.status(500).json({ message: "Failed to sign in!", error });
+    return res
+      .status(500)
+      .json({ message: "Failed to sign in!", error: error.message });
+  } else {
+    return res
+      .status(200)
+      .json({ message: "Sign in successful!", session: data.session });
   }
-
-  return res
-    .status(200)
-    .json({ message: "Sign in successful!", session: data.session });
 });
 
 const verifySession = async (req, res, next) => {
@@ -93,13 +98,167 @@ const verifySession = async (req, res, next) => {
   }
 
   req.user = user; // Attach user object to the request for access in endpoints
-
+  // req.user = {
+  //   id: "034b99e6-1797-44cc-b927-09e070d68455",
+  //   aud: "authenticated",
+  //   role: "authenticated",
+  //   email: "kameron.heaney72@yahoo.com",
+  //   email_confirmed_at: "2024-04-15T00:27:53.737141Z",
+  //   phone: "",
+  //   confirmed_at: "2024-04-15T00:27:53.737141Z",
+  //   last_sign_in_at: "2024-04-15T22:48:13.726263904Z",
+  //   app_metadata: {
+  //     provider: "email",
+  //     providers: ["email"],
+  //   },
+  //   user_metadata: {
+  //     email: "kameron.heaney72@yahoo.com",
+  //     email_verified: false,
+  //     phone_verified: false,
+  //     sub: "034b99e6-1797-44cc-b927-09e070d68455",
+  //   },
+  //   identities: [
+  //     {
+  //       identity_id: "4d1451db-e099-4be9-ab1f-b0fca5ed8692",
+  //       id: "034b99e6-1797-44cc-b927-09e070d68455",
+  //       user_id: "034b99e6-1797-44cc-b927-09e070d68455",
+  //       identity_data: {
+  //         email: "kameron.heaney72@yahoo.com",
+  //         email_verified: false,
+  //         phone_verified: false,
+  //         sub: "034b99e6-1797-44cc-b927-09e070d68455",
+  //       },
+  //       provider: "email",
+  //       last_sign_in_at: "2024-04-15T00:27:53.734667Z",
+  //       created_at: "2024-04-15T00:27:53.734721Z",
+  //       updated_at: "2024-04-15T00:27:53.734721Z",
+  //       email: "kameron.heaney72@yahoo.com",
+  //     },
+  //   ],
+  //   created_at: "2024-04-15T00:27:53.732006Z",
+  //   updated_at: "2024-04-15T22:48:13.734183Z",
+  //   is_anonymous: false,
+  // };
   next();
 };
+
+app.get("/api/dashboard", verifySession, async (req, res) => {
+  const userId = req.user.id;
+
+  try {
+    // Execute all database queries concurrently using Promise.all
+    const [
+      totalHabits,
+      activeHabits,
+      longestStreakData,
+      journalEntries,
+      habitCompletionTrends,
+    ] = await Promise.all([
+      supabase
+        .from("habits")
+        .select("habit_id", { count: "exact", head: true })
+        .eq("user_id", userId),
+      supabase
+        .from("habit_progression")
+        .select("*, habits!inner(habit_id)")
+        .eq("habits.user_id", userId) // Join habits and habit_progression
+        .gte(
+          "progress_date",
+          new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toDateString()
+        ), // Past week
+      supabase
+        .from("habit_progression")
+        .select("progress_date, completion_status, habits!inner(habit_id)")
+        .eq("habits.user_id", userId) // Join habits and habit_progression
+        .order("progress_date", { ascending: true }), // Order chronologically
+      supabase
+        .from("journal_entries")
+        .select("*", { count: "exact", head: false })
+        .eq("user_id", userId)
+        .order("entry_date", { ascending: false })
+        .limit(5),
+      supabase
+        .from("habit_progression")
+        .select("progress_date, completion_status, habits!inner(habit_id)")
+        .eq("habits.user_id", userId) // Filter habits by user ID
+        .gte(
+          "progress_date",
+          new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toDateString()
+        ), // Past month
+    ]);
+    // Calculate longest streak from completion status
+    let currentStreak = 0;
+    let longestStreak = 0;
+    let habitName = "";
+
+    for (const entry of longestStreakData.data) {
+      if (entry.completion_status) {
+        currentStreak++;
+      } else {
+        currentStreak = 0;
+      }
+
+      if (currentStreak > longestStreak) {
+        longestStreak = currentStreak;
+        habitName = ""; // Assuming habit name isn't stored in habit_progression
+      }
+    }
+    console.log(habitCompletionTrends);
+    // Get today's date
+    const today = new Date();
+
+    // Prepare an empty array to store weekly completion data
+    const weeklyCompletions = [];
+
+    // Loop through the last 4 weeks
+    for (let i = 0; i < 4; i++) {
+      // Move back i weeks from today
+      const weekStart = new Date(today.setDate(today.getDate() - i * 7));
+      weekStart.setDate(weekStart.getDate() - (weekStart.getDay() || 7)); // Set to beginning of week (Sunday)
+
+      const weekEnd = new Date(weekStart.getTime()); // Clone the start date for weekEnd
+      weekEnd.setDate(weekEnd.getDate() + 6); // Move to the end of the i-th week
+
+      // Filter habit completions within the current week range (inclusive)
+      const weekData = habitCompletionTrends.data.filter((entry) => {
+        const entryDate = new Date(entry.progress_date);
+        return entryDate >= weekStart && entryDate <= weekEnd;
+      });
+
+      // Count completions for the week
+      const weekCount = weekData.reduce(
+        (acc, curr) => acc + (curr.completion_status ? 1 : 0),
+        0
+      );
+
+      // Add data for the current week to the results
+      weeklyCompletions.push({
+        week: `Week ${i + 1}`,
+        count: weekCount,
+      });
+    }
+
+    const formattedData = {
+      totalHabits: totalHabits.count,
+      activeHabits: activeHabits.data.length,
+      longestStreak: { longestStreak, habitName }, // Update format
+      journalEntries,
+      habitCompletionTrends: weeklyCompletions.reverse(),
+    };
+
+    return res.status(200).json(formattedData);
+  } catch (error) {
+    console.error(error);
+    return res
+      .status(500)
+      .json({ message: "Failed to retrieve dashboard data!", error });
+  }
+});
 
 //Create a habit for a user
 app.post("/api/habits/add", verifySession, async (req, res) => {
   const { habit_name } = req.body;
+  console.log(req.body);
   const user_id = req.user.id;
 
   const { data, error } = await supabase
@@ -196,8 +355,81 @@ app.get("/api/habits/view", verifySession, async (req, res) => {
       .status(500)
       .json({ message: "Failed to retrieve habits!", error: habitError });
   }
+  console.log(habits);
+  const habitsWithProgress = await Promise.all(
+    habits.map(async (habit) => {
+      const { data: progressData, error: progressError } = await supabase
+        .from("habit_progression")
+        .select("progress_date, completion_status")
+        .eq("habit_id", habit.habit_id); // Filter by habit ID
 
-  res.status(200).json({ message: "Habits retrieved successfully!", habits });
+      if (progressError) {
+        console.error(
+          `Error fetching progress for habit ${habit.habit_id}:`,
+          progressError
+        );
+        // You can handle individual habit progress errors here (optional)
+        return habit; // Return the habit object even without progress data
+      }
+
+      return { ...habit, progressData };
+    })
+  );
+
+  function calculateStreak(progressDates) {
+    // Sort progress dates in ascending order
+    progressDates.sort(
+      (a, b) => new Date(a.progress_date) - new Date(b.progress_date)
+    );
+
+    let streakLength = 0;
+    let streakAboutToExpire = false;
+
+    for (let i = 0; i < progressDates.length - 1; i++) {
+      const currentDate = new Date(progressDates[i].progress_date);
+      const nextDate = new Date(progressDates[i + 1].progress_date);
+
+      // Check if the dates are consecutive
+      const timeDiff = nextDate.getTime() - currentDate.getTime();
+      const oneDay = 24 * 60 * 60 * 1000;
+      if (timeDiff <= oneDay) {
+        streakLength++;
+      } else {
+        // Streak broken, reset streak length
+        streakLength = 0;
+      }
+
+      // Check if the streak is about to expire (last progress date is yesterday)
+      if (i === progressDates.length - 2 && timeDiff > oneDay) {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const lastDate = new Date(progressDates[i + 1].progress_date);
+        if (
+          lastDate.getFullYear() === yesterday.getFullYear() &&
+          lastDate.getMonth() === yesterday.getMonth() &&
+          lastDate.getDate() === yesterday.getDate()
+        ) {
+          streakAboutToExpire = true;
+        }
+      }
+    }
+
+    return { streakLength, streakAboutToExpire };
+  }
+
+  // Calculate streak for each habit with progress data
+  const habitsWithStreaks = habitsWithProgress.map((habit) => {
+    if (!habit.progressData) {
+      return habit; // No progress data, skip streak calculation
+    }
+    const currentStreak = calculateStreak(habit.progressData);
+    return { ...habit, currentStreak };
+  });
+
+  res.status(200).json({
+    message: "Habits retrieved successfully!",
+    habits: habitsWithStreaks,
+  });
 });
 
 //Delete a user's habit by habit id
@@ -297,6 +529,52 @@ app.get("/api/journal/entries", verifySession, async (req, res) => {
   return res
     .status(200)
     .json({ message: "Journal entries retrieved successfully!", entries });
+});
+
+//Delete journal entries for a user
+app.delete("/api/journal-entries/:id", verifySession, async (req, res) => {
+  const user_id = req.user.id; // Get user ID from session
+  const entryId = req.params.id;
+
+  // Check if entry exists and belongs to the user
+  const { data: entry, error: entryError } = await supabase
+    .from("journal_entries")
+    .select("*")
+    .eq("entry_id", entryId)
+    .single();
+
+  if (entryError) {
+    return res.status(500).json({
+      message: "Failed to retrieve journal entry!",
+      error: entryError,
+    });
+  }
+
+  if (!entry) {
+    return res.status(404).json({ message: "Journal entry not found!" });
+  }
+
+  if (entry.user_id !== user_id) {
+    return res
+      .status(403)
+      .json({ message: "Unauthorized! You can only delete your own entries." });
+  }
+
+  // Delete the journal entry
+  const { error: deleteError } = await supabase
+    .from("journal_entries")
+    .delete()
+    .eq("entry_id", entryId);
+
+  if (deleteError) {
+    return res
+      .status(500)
+      .json({ message: "Failed to delete journal entry!", error: deleteError });
+  }
+
+  return res
+    .status(200)
+    .json({ message: "Journal entry deleted successfully!" });
 });
 
 //Edit an entry in a user's journal
@@ -468,6 +746,37 @@ app.get("/api/habits/progression", verifySession, async (req, res) => {
     message: "Habit progression retrieved successfully!",
     progression: habitProgression,
   });
+});
+
+//Get habit progression for a certain habit
+app.get("/api/habit-logs/:habitId", verifySession, async (req, res) => {
+  const habitId = req.params.habitId;
+  const userId = req.user.id;
+  console.log(userId);
+  try {
+    const logs = await supabase
+      .from("habits")
+      .select(
+        "*, habit_progression(progression_id, progress_date)!inner(habit_id)"
+      )
+      .eq("user_id", userId) // Filter habits by user ID
+      .eq("habit_id", habitId) // Filter by specific habit ID
+      .single();
+
+    // Check if any logs were found (habit might not belong to user)
+    if (logs.data.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "Habit not found or unauthorized access!" });
+    }
+
+    return res.status(200).json(logs.data);
+  } catch (error) {
+    console.error(error);
+    return res
+      .status(500)
+      .json({ message: "Failed to retrieve habit logs!", error });
+  }
 });
 
 app.listen(PORT, () => {
