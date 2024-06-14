@@ -39,7 +39,7 @@ app.post("/api/auth/signup", async (req, res) => {
     email,
     // Add other user data properties here
   };
-
+  console.log(userData)
   const { data: insertData, error: insertError } = await supabase
     .from("users")
     .insert(userData);
