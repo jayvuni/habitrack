@@ -57,7 +57,7 @@ export default function LoginForm() {
             <div className="grid gap-4">
               <div className="grid grid-cols-1 gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="last-name">Last name</Label>
+                  <Label htmlFor="last-name">Username</Label>
                   <Input
                     id="last-name"
                     placeholder="Robinson"
