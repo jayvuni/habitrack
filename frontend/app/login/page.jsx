@@ -14,18 +14,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import axios from "axios";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, LoaderIcon, Terminal } from "lucide-react";
 
 export default function LoginForm() {
   const { push } = useRouter();
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
-    setError("");
-    setLoading(true);
+
     const payload = {
       email: event.currentTarget.email.value,
       password: event.currentTarget.password.value,
@@ -34,13 +29,14 @@ export default function LoginForm() {
     try {
       const { data } = await axios.post("/api/auth/login", payload);
 
+      alert(JSON.stringify(data));
+
       // redirect the user to /dashboard
       push("/app");
     } catch (e) {
       const error = e;
-      setError(e.response.data.error);
-    } finally {
-      setLoading(false);
+
+      alert(error.message);
     }
   };
   return (
@@ -51,13 +47,6 @@ export default function LoginForm() {
           <CardDescription>
             Enter your email below to login to your account
           </CardDescription>
-          {error != "" && (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Oops!</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit}>
@@ -78,7 +67,7 @@ export default function LoginForm() {
                 </div>
                 <Input id="password" type="password" name="password" required />
               </div>
-              <Button type="submit" className="w-full" disabled={loading}>
+              <Button type="submit" className="w-full">
                 Login
               </Button>
             </div>
